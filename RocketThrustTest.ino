@@ -2,6 +2,8 @@
 #include <CH376msc.h>
 #include <SoftwareSerial.h>
 #include <MPU6050.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
 #define calibration_factor -7050.0
 #define DOUT 3
@@ -11,6 +13,7 @@ HX711 scale(DOUT, CLK);
 SoftwareSerial HM10(8, 7);
 SoftwareSerial CH376Serial(10, 11);
 CH376msc usb(CH376Serial);
+LiquidCrystal_I2C lcd(0x27, 16, 2);  // Set the LCD address to 0x27 for a 16 chars and 2 line display
 
 const int Led = 3;
 bool sensorRunning = false;
@@ -47,6 +50,12 @@ void setup() {
     while (1);
   }
   Serial.println("USB 연결 성공");
+
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.print("System Ready");
+  delay(1000);
 }
 
 void handleDebuggerModeCommands(const String& command) {
@@ -71,12 +80,18 @@ void handleNormalModeCommands(const String& command) {
   if (command == "Setting Zero-point") {
     scale.tare();
     HM10.println("영점 설정 완료");
+    lcd.clear();
+    lcd.print("Zero-point Set");
   } else if (command == "Start Sensor") {
     sensorRunning = true;
     HM10.println("센서 시작");
+    lcd.clear();
+    lcd.print("Sensor Started");
   } else if (command == "Stop Sensor") {
     sensorRunning = false;
     HM10.println("센서 중지");
+    lcd.clear();
+    lcd.print("Sensor Stopped");
   } else if (command == "Debugger Mode") {
     debuggerMode = true;
     HM10.println("디버거 모드 진입");
@@ -91,6 +106,11 @@ void handleSensorData() {
   HM10.print("Weight: ");
   HM10.print(weightGrams, 1);
   HM10.println(" g");
+
+  lcd.clear();
+  lcd.print("Weight: ");
+  lcd.print(weightGrams, 1);
+  lcd.print(" g");
 
   if (usb.checkConnection()) {
     if (usb.openFile("ThrustData.csv", FILE_WRITE)) {
@@ -116,6 +136,15 @@ void handleHorizonMode() {
   HM10.print(gyro.y);
   HM10.print(" Z: ");
   HM10.println(gyro.z);
+
+  lcd.clear();
+  lcd.print("Gyro X: ");
+  lcd.print(gyro.x);
+  lcd.setCursor(0, 1);
+  lcd.print("Y: ");
+  lcd.print(gyro.y);
+  lcd.print(" Z: ");
+  lcd.print(gyro.z);
 }
 
 void loop() {
