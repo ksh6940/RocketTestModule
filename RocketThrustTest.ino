@@ -1,3 +1,5 @@
+// 수정 예정 (계획 변경 전 구상 버전)
+
 #include "HX711.h"
 #include <CH376msc.h>
 #include <SoftwareSerial.h>
