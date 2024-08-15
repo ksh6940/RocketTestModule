@@ -9,10 +9,10 @@ HX711 Scale;
 
 const uint8_t dataPin = 6;
 const uint8_t clockPin = 7;
-const uint8_t blueLED = 8; // 블루 LED 핀
+const uint8_t blueLED = 8;  // 블루 LED 핀
 
-SoftwareSerial BTSerial(4, 5); // Bluetooth 시리얼
-LiquidCrystal_I2C lcd(0x27, 16, 2); // LCD 디스플레이 설정
+SoftwareSerial BTSerial(4, 5);       // Bluetooth 시리얼
+LiquidCrystal_I2C lcd(0x27, 16, 2);  // LCD 디스플레이 설정
 
 File myFile;
 bool debuggingMode = false;
@@ -40,13 +40,14 @@ void setup() {
   // SD Module 초기화
   if (!SD.begin(4)) {
     Serial.println("SD 카드 초기화 실패");
-    while (1);
+    while (1)
+      ;
   }
   Serial.println("SD 카드 초기화 성공");
 
   // 영점 조절 및 페어링 대기
   calibrate();
-  delay(2000); // 잠시 대기
+  delay(2000);  // 잠시 대기
 
   // HM-10 블루투스 연결 대기
   waitForBluetoothConnection();
@@ -74,7 +75,7 @@ void waitForBluetoothConnection() {
   unsigned long startMillis = millis();
   bool connected = false;
 
-  while (millis() - startMillis < 30000) { // 30초 동안 연결 대기
+  while (millis() - startMillis < 30000) {  // 30초 동안 연결 대기
     if (BTSerial.available()) {
       String response = BTSerial.readStringUntil('\n');
       if (response.indexOf("CONNECTED") >= 0) {
@@ -82,14 +83,14 @@ void waitForBluetoothConnection() {
         break;
       }
     }
-    delay(1000); // 1초 대기
+    delay(1000);  // 1초 대기
   }
 
   if (connected) {
-    digitalWrite(blueLED, HIGH); // 블루 LED 켜짐
+    digitalWrite(blueLED, HIGH);  // 블루 LED 켜짐
     Serial.println("Bluetooth 연결 성공");
   } else {
-    blinkLED(5); // LED가 5초 간격으로 5번 깜빡임
+    blinkLED(5);  // LED가 5초 간격으로 5번 깜빡임
     Serial.println("Bluetooth 연결 실패");
   }
 }
@@ -105,7 +106,8 @@ void blinkLED(int times) {
 
 void Command(String command) {
   if (command == "Setting ZeroPoint") {
-    handleZeroPointSetting();
+    calibrate();
+    sendFeedback("영점 조절 완료");
   } else if (command == "Start Sensor") {
     handleStartSensor();
   } else if (command == "Stop Sensor") {
@@ -116,14 +118,11 @@ void Command(String command) {
     handleDebuggerModeOn();
   } else if (command == "Debugger Mode Off") {
     handleDebuggerModeOff();
+  } else if (command == "Restart Module") {
+    setup();
   } else {
     handleUnknownCommand();
   }
-}
-
-void handleZeroPointSetting() {
-  calibrate();
-  sendFeedback("영점 조절 완료");
 }
 
 void handleStartSensor() {
@@ -152,7 +151,7 @@ void handleStopSensor() {
 
 void handleFileOpen() {
   if (myFile) {
-    myFile.close(); // 파일을 열기 전에 현재 열려 있는 파일을 닫음
+    myFile.close();  // 파일을 열기 전에 현재 열려 있는 파일을 닫음
   }
   myFile = SD.open("ThrustData.csv");
   if (myFile) {
@@ -179,7 +178,8 @@ void handleUnknownCommand() {
 void calibrate() {
   Serial.println("로드셀에서 모든 물체를 제거하고, 영점을 설정하려면 엔터를 누르세요.");
   while (Serial.available()) Serial.read();
-  while (Serial.available() == 0);
+  while (Serial.available() == 0)
+    ;
   Serial.println("영점을 설정 중입니다...");
   Scale.tare(20);                        // 20번 측정하여 평균값으로 영점을 설정
   uint32_t offset = Scale.get_offset();  // 설정된 영점 값을 가져옴
