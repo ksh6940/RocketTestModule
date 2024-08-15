@@ -1,175 +1,204 @@
-// 수정 예정 (계획 변경 전 구상 버전)
-
 #include "HX711.h"
-#include <CH376msc.h>
 #include <SoftwareSerial.h>
-#include <MPU6050.h>
-#include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <SD.h>
+#include <SPI.h>
 
-#define calibration_factor -7050.0
-#define DOUT 3
-#define CLK 2
+HX711 Scale;
 
-HX711 scale(DOUT, CLK);
-SoftwareSerial HM10(8, 7);
-SoftwareSerial CH376Serial(10, 11);
-CH376msc usb(CH376Serial);
-LiquidCrystal_I2C lcd(0x27, 16, 2);  // Set the LCD address to 0x27 for a 16 chars and 2 line display
+const uint8_t dataPin = 6;
+const uint8_t clockPin = 7;
+const uint8_t blueLED = 8; // 블루 LED 핀
 
-const int Led = 3;
-bool sensorRunning = false;
-bool debuggerMode = false;
-bool horizonMode = false;
+SoftwareSerial BTSerial(4, 5); // Bluetooth 시리얼
+LiquidCrystal_I2C lcd(0x27, 16, 2); // LCD 디스플레이 설정
 
-MPU6050 mpu;
+File myFile;
+bool debuggingMode = false;
+bool sensorActive = false;
 
 void setup() {
-  Serial.begin(9600);
-  pinMode(Led, OUTPUT);
+  Serial.begin(115200);
+  pinMode(blueLED, OUTPUT);
+  digitalWrite(blueLED, LOW);
 
-  scale.set_scale(calibration_factor);
-  scale.tare();
+  // HX711 초기화
+  Scale.begin(dataPin, clockPin);
+  Scale.set_scale(127.15);
+  Scale.tare();
 
-  mpu.initialize();
-  if (!mpu.testConnection()) {
-    Serial.println("MPU6050 연결 실패");
-    while (1);
-  }
-  Serial.println("MPU6050 연결 성공");
+  // Bluetooth 초기화
+  BTSerial.begin(9600);
 
-  HM10.begin(9600);
-  CH376Serial.begin(9600);
-
-  if (!usb.init()) {
-    Serial.println("USB 모듈 초기화 실패");
-    while (1);
-  }
-  Serial.println("USB 모듈 초기화 성공");
-
-  if (!usb.mount()) {
-    Serial.println("USB 연결 실패");
-    while (1);
-  }
-  Serial.println("USB 연결 성공");
-
+  // Display Module
   lcd.init();
   lcd.backlight();
-  lcd.clear();
-  lcd.print("System Ready");
-  delay(1000);
-}
+  lcd.setCursor(0, 0);
+  lcd.print("Initializing...");
 
-void handleDebuggerModeCommands(const String& command) {
-  if (command == "Exit Debug") {
-    debuggerMode = false;
-    HM10.println("디버거 모드 종료");
-  } else if (command == "Restart") {
-    HM10.println("재시작 중...");
-    setup();
-  } else if (command == "Horizon Mode") {
-    horizonMode = true;
-    HM10.println("수평 측정 모드 진입");
-  } else if (command == "Exit Horizon Mode") {
-    horizonMode = false;
-    HM10.println("수평 측정 모드 탈출");
-  } else {
-    HM10.println("디버거 모드에서 유효하지 않은 명령어입니다.");
+  // SD Module 초기화
+  if (!SD.begin(4)) {
+    Serial.println("SD 카드 초기화 실패");
+    while (1);
   }
-}
+  Serial.println("SD 카드 초기화 성공");
 
-void handleNormalModeCommands(const String& command) {
-  if (command == "Setting Zero-point") {
-    scale.tare();
-    HM10.println("영점 설정 완료");
-    lcd.clear();
-    lcd.print("Zero-point Set");
-  } else if (command == "Start Sensor") {
-    sensorRunning = true;
-    HM10.println("센서 시작");
-    lcd.clear();
-    lcd.print("Sensor Started");
-  } else if (command == "Stop Sensor") {
-    sensorRunning = false;
-    HM10.println("센서 중지");
-    lcd.clear();
-    lcd.print("Sensor Stopped");
-  } else if (command == "Debugger Mode") {
-    debuggerMode = true;
-    HM10.println("디버거 모드 진입");
-  } else {
-    HM10.println("유효하지 않은 명령어입니다.");
-  }
-}
+  // 영점 조절 및 페어링 대기
+  calibrate();
+  delay(2000); // 잠시 대기
 
-void handleSensorData() {
-  float weightGrams = scale.get_units() * 1000;
-
-  HM10.print("Weight: ");
-  HM10.print(weightGrams, 1);
-  HM10.println(" g");
-
-  lcd.clear();
-  lcd.print("Weight: ");
-  lcd.print(weightGrams, 1);
-  lcd.print(" g");
-
-  if (usb.checkConnection()) {
-    if (usb.openFile("ThrustData.csv", FILE_WRITE)) {
-      String data = String(weightGrams, 1) + "\n";
-      usb.writeFile(data.c_str(), data.length());
-      usb.closeFile();
-      HM10.println("데이터 쓰기 완료");
-    } else {
-      HM10.println("파일 열기 실패");
-    }
-  } else {
-    HM10.println("USB 연결 해제");
-  }
-}
-
-void handleHorizonMode() {
-  VectorInt16 gyro;
-  mpu.getRotation(&gyro.x, &gyro.y, &gyro.z);
-
-  HM10.print("Gyroscope X: ");
-  HM10.print(gyro.x);
-  HM10.print(" Y: ");
-  HM10.print(gyro.y);
-  HM10.print(" Z: ");
-  HM10.println(gyro.z);
-
-  lcd.clear();
-  lcd.print("Gyro X: ");
-  lcd.print(gyro.x);
-  lcd.setCursor(0, 1);
-  lcd.print("Y: ");
-  lcd.print(gyro.y);
-  lcd.print(" Z: ");
-  lcd.print(gyro.z);
+  // HM-10 블루투스 연결 대기
+  waitForBluetoothConnection();
 }
 
 void loop() {
-  if (HM10.available()) {
-    digitalWrite(Led, HIGH);
-
-    String command = HM10.readStringUntil('\n').trim();
-
-    if (debuggerMode) {
-      handleDebuggerModeCommands(command);
-    } else {
-      handleNormalModeCommands(command);
-    }
+  if (BTSerial.available()) {
+    String command = BTSerial.readStringUntil('\n');
+    Command(command);
   }
 
-  if (sensorRunning) {
-    handleSensorData();
-    delay(1000);
-  } else if (horizonMode) {
-    handleHorizonMode();
-    delay(1000);
+  if (sensorActive) {
+    float weight = Scale.get_units(10);
+    if (myFile) {
+      myFile.print(weight);
+      myFile.println(" g");
+      if (debuggingMode) {
+        sendDebugMessage("Weight recorded: " + String(weight) + " g");
+      }
+    }
+  }
+}
+
+void waitForBluetoothConnection() {
+  unsigned long startMillis = millis();
+  bool connected = false;
+
+  while (millis() - startMillis < 30000) { // 30초 동안 연결 대기
+    if (BTSerial.available()) {
+      String response = BTSerial.readStringUntil('\n');
+      if (response.indexOf("CONNECTED") >= 0) {
+        connected = true;
+        break;
+      }
+    }
+    delay(1000); // 1초 대기
+  }
+
+  if (connected) {
+    digitalWrite(blueLED, HIGH); // 블루 LED 켜짐
+    Serial.println("Bluetooth 연결 성공");
   } else {
-    digitalWrite(Led, LOW);
-    HM10.println("센서 실행 중지");
+    blinkLED(5); // LED가 5초 간격으로 5번 깜빡임
+    Serial.println("Bluetooth 연결 실패");
+  }
+}
+
+void blinkLED(int times) {
+  for (int i = 0; i < times; i++) {
+    digitalWrite(blueLED, HIGH);
+    delay(500);
+    digitalWrite(blueLED, LOW);
+    delay(500);
+  }
+}
+
+void Command(String command) {
+  if (command == "Setting ZeroPoint") {
+    handleZeroPointSetting();
+  } else if (command == "Start Sensor") {
+    handleStartSensor();
+  } else if (command == "Stop Sensor") {
+    handleStopSensor();
+  } else if (command == "File Open") {
+    handleFileOpen();
+  } else if (command == "Debugger Mode On") {
+    handleDebuggerModeOn();
+  } else if (command == "Debugger Mode Off") {
+    handleDebuggerModeOff();
+  } else {
+    handleUnknownCommand();
+  }
+}
+
+void handleZeroPointSetting() {
+  calibrate();
+  sendFeedback("영점 조절 완료");
+}
+
+void handleStartSensor() {
+  if (!sensorActive) {
+    myFile = SD.open("ThrustData.csv", FILE_WRITE);
+    if (myFile) {
+      sendFeedback("측정 시작 및 파일 열기");
+      sensorActive = true;
+    } else {
+      sendFeedback("파일 열기 실패");
+    }
+  } else {
+    sendFeedback("이미 측정이 시작되었습니다.");
+  }
+}
+
+void handleStopSensor() {
+  if (sensorActive) {
+    myFile.close();
+    sendFeedback("측정 중지 및 파일 닫기");
+    sensorActive = false;
+  } else {
+    sendFeedback("측정이 활성화되지 않았습니다.");
+  }
+}
+
+void handleFileOpen() {
+  if (myFile) {
+    myFile.close(); // 파일을 열기 전에 현재 열려 있는 파일을 닫음
+  }
+  myFile = SD.open("ThrustData.csv");
+  if (myFile) {
+    sendFeedback("파일 열기 성공");
+  } else {
+    sendFeedback("파일 열기 실패");
+  }
+}
+
+void handleDebuggerModeOn() {
+  debuggingMode = true;
+  sendFeedback("디버깅 모드 활성화");
+}
+
+void handleDebuggerModeOff() {
+  debuggingMode = false;
+  sendFeedback("디버깅 모드 비활성화");
+}
+
+void handleUnknownCommand() {
+  sendFeedback("존재하지 않는 명령어입니다.");
+}
+
+void calibrate() {
+  Serial.println("로드셀에서 모든 물체를 제거하고, 영점을 설정하려면 엔터를 누르세요.");
+  while (Serial.available()) Serial.read();
+  while (Serial.available() == 0);
+  Serial.println("영점을 설정 중입니다...");
+  Scale.tare(20);                        // 20번 측정하여 평균값으로 영점을 설정
+  uint32_t offset = Scale.get_offset();  // 설정된 영점 값을 가져옴
+  Serial.print("설정된 OFFSET (영점 조절값): ");
+  Serial.println(offset);
+  Serial.print("\n프로젝트에서 다음을 사용하세요:\n");
+  Serial.print("Scale.set_offset(");
+  Serial.print(offset);
+  Serial.print(");\n");
+  Serial.println("\n\n영점 조절이 완료되었습니다. 저울이 준비되었습니다.");
+}
+
+void sendFeedback(const String& message) {
+  Serial.println(message);
+  BTSerial.println(message);
+}
+
+void sendDebugMessage(const String& message) {
+  if (debuggingMode) {
+    BTSerial.println(message);
   }
 }
