@@ -1,0 +1,94 @@
+#include <ArduinoBLE.h>
+#include <Arduino_LSM9DS1.h>
+#include <Arduino_LPS22HB.h>
+#include <Servo.h>
+
+Servo myServo;
+
+BLEService AccelerationService("19B10000-E8F2-537E-4F6C-D104768A1214");
+BLEStringCharacteristic Acceleration("19B10001-E8F2-537E-4F6C-D104768A1214", BLEWrite | BLERead | BLENotify, 50);
+
+void setup() {
+  Serial.begin(9600);
+
+  myServo.attach(9);  // 서보 모터의 제어 핀을 D9에 연결
+  myServo.write(0);   // 서보 모터 초기 위치 설정
+
+  if (!IMU.begin()) {
+    Serial.println("Failed to initialize IMU!");
+    while (1)
+      ;
+  }
+
+  if (!BARO.begin()) {
+    Serial.println("Failed to initialize pressure sensor!");
+    while (1)
+      ;
+  }
+
+  if (!BLE.begin()) {
+    Serial.println("starting BLE failed!");
+    while (1)
+      ;
+  }
+
+  BLE.setLocalName("AccelerationModule");
+  BLE.setAdvertisedService(AccelerationService);
+  AccelerationService.addCharacteristic(Acceleration);
+  BLE.addService(AccelerationService);
+
+  BLE.advertise();
+
+  Serial.println("Bluetooth device active, waiting for connections...");
+}
+
+void loop() {
+  float pressure = BARO.readPressure();
+  float x, y, z;
+
+  Serial.print("대기압 : ");
+  Serial.print(pressure * 10);
+  Serial.println(" hPa");
+
+  if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(x, y, z);
+
+    Serial.print("가속도 : ");
+    Serial.println(z);
+    Serial.println();
+
+    // 가속도가 음수일 때 서보 모터 작동
+    if (z < 0) {
+      myServo.write(135);  // 서보 모터를 135도로 설정
+      Serial.println("서보 모터 작동 : 가속도 음수");
+    } else {
+      myServo.write(0);  // 서보 모터를 0도로 설정
+      Serial.println("서보 모터 비활성화 : 가속도 양수 또는 0");
+    }
+
+    // 압력과 가속도를 BLE 특성에 기록
+    String pressureData = String(pressure * 10);
+    String accelData = String(z);
+
+    // BLE 특성에 압력 데이터 기록
+    Acceleration.writeValue("Pressure: " + pressureData + " hPa");
+
+    // BLE 특성에 가속도 데이터 기록
+    Acceleration.writeValue("Acceleration: " + accelData);
+  }
+
+  BLEDevice central = BLE.central();
+
+  if (central) {
+    Serial.print("Connected to central: ");
+    Serial.println(central.address());
+
+    while (central.connected()) {
+      // BLE 장치가 연결된 동안 계속해서 데이터를 전송할 수 있습니다.
+      delay(1000);  // 1초 대기
+    }
+  }
+
+  delay(1000);  // 1초 대기
+}
+
