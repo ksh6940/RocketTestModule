@@ -1,20 +1,17 @@
-#include <ArduinoBLE.h>
 #include <Arduino_LSM9DS1.h>
 #include <Arduino_LPS22HB.h>
 #include <Servo.h>
+#include <SD.h>
 
 Servo myServo;
+
+File dataFile;
 
 void setup() {
   Serial.begin(9600);
 
   myServo.attach(9);  // 서보 모터의 제어 핀을 D9에 연결
   myServo.write(0);   // 서보 모터 초기 위치 설정
-
-  if (!BLE.begin()) {
-    Serial.println("Starting Bluetooth® Low Energy module failed!");
-    while (1);
-  }
 
   if (!IMU.begin()) {
     Serial.println("Failed to initialize IMU!");
@@ -24,6 +21,11 @@ void setup() {
   if (!BARO.begin()) {
     Serial.println("Failed to initialize pressure sensor!");
     while (1);
+  }
+
+  if (!SD.begin(4)) {
+    Serial.println("SD 카드 초기화 실패");
+    while(1);
   }
 }
 
@@ -47,10 +49,28 @@ void loop() {
       myServo.write(180);  // 서보 모터를 90도로 설정
       Serial.println("서보 모터 작동 : 가속도 음수");
     } else {
-      myServo.write(0);   // 서보 모터를 0도로 설정
       Serial.println("서보 모터 비활성화 : 가속도 양수 또는 0");
     }
   }
 
-  delay(1000); // 1초 대기
+  SaveFunction(z, pressure);
+
+  delay(1000);  // 1초 대기
+}
+
+void SaveFunction(float acceleration, float pressure) {
+  File dataFile = SD.open("RocketHeadData.csv", FILE_WRITE);
+
+  if (dataFile) {
+    dataFile.print(acceleration);
+    dataFile.print(",");
+    dataFile.print(pressure);
+    dataFile.print(",");
+    dataFile.println(",");
+    dataFile.close();
+
+    Serial.println("데이터 저장 성공");
+  } else {
+    Serial.println("파일 열기 실패");
+  }
 }
